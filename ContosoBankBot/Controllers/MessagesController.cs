@@ -1,10 +1,15 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Runtime.CompilerServices;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Http;
 using Microsoft.Bot.Connector;
-
+using Microsoft.Bot.Builder.Dialogs;
+using Newtonsoft.Json;
 
 namespace ContosoBankBot
 {
@@ -17,49 +22,217 @@ namespace ContosoBankBot
         /// POST: api/Messages
         /// Receive a message from a user and reply to it
         /// </summary>
-        public async Task<HttpResponseMessage> Post([FromBody]Activity activity)
+        public async Task<HttpResponseMessage> Post([FromBody] Activity activity)
         {
-            StateClient stateClient = activity.GetStateClient();
-            BotData userData = stateClient.BotState.GetUserData(activity.ChannelId, activity.From.Id);
-            bool greetingMessageWasShown = userData.GetProperty<bool>("GreetingMessageWasShown");
-            string preferredUserName = userData.GetProperty<string>("PreferredName") ?? activity.From.Name;
-
-            Activity reply = activity.CreateReply("Wrong command");
-
             if (activity.Type == ActivityTypes.Message)
             {
-                if (!greetingMessageWasShown)
-                {
-                    reply = activity.CreateReply($@"Hello, {preferredUserName}!
-                                                            I am the Controso Bank Bot!
-                                                            I can tell you the latest news from Contoso Bank, show exchange rates, notify about your transactions and do other things!");
-                    //connector.Conversations.ReplyToActivityAsync(reply);
-                    userData.SetProperty<bool>("GreetingMessageWasShown", true);
-                    stateClient.BotState.SetUserData(activity.ChannelId, activity.From.Id, userData);
-                }
-                else
-                {
-                    reply = activity.CreateReply($@"{preferredUserName}, You can use standard commands or turn on language recognition mode");
-                }
-
                 if (activity.Text == "/deleteprofile")
                 {
-                    stateClient.BotState.DeleteStateForUser(activity.ChannelId, activity.From.Id);
-                    reply = activity.CreateReply("User data was removed");
+                    activity.GetStateClient().BotState.DeleteStateForUser(activity.ChannelId, activity.From.Id);
+                    Activity reply = activity.CreateReply("User data was removed");
+
+                    ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
+                    await connector.Conversations.ReplyToActivityAsync(reply);
                 }
 
-                ConnectorClient connector = new ConnectorClient(new Uri(activity.ServiceUrl));
+                // Try to get username.
+                StateClient stateClient = activity.GetStateClient();
+                BotData userData = stateClient.BotState.GetUserData(activity.ChannelId, activity.From.Id);
+                if (string.IsNullOrEmpty(userData.GetProperty<string>("PreferredName")))
+                {
+                    if (!string.IsNullOrEmpty(activity.From.Name))
+                    {
+                        userData.SetProperty("PreferredName", activity.From.Name);
+                        stateClient.BotState.SetUserData(activity.ChannelId, activity.From.Id, userData);
+                    }
+                }
 
-                // return our reply to the user 
-                await connector.Conversations.ReplyToActivityAsync(reply);
+                await Conversation.SendAsync(activity, () => new RootDialog());
             }
             else
             {
-                HandleSystemMessage(activity);
+                this.HandleSystemMessage(activity);
             }
 
             var response = Request.CreateResponse(HttpStatusCode.OK);
             return response;
+        }
+
+        //StateClient stateClient = activity.GetStateClient();
+        //BotData userData = stateClient.BotState.GetUserData(activity.ChannelId, activity.From.Id);
+        //bool greetingMessageWasShown = userData.GetProperty<bool>("GreetingMessageWasShown");
+        //string preferredUserName = userData.GetProperty<string>("PreferredName") ?? activity.From.Name;
+
+        //Activity reply = activity.CreateReply("Wrong command");
+
+        //if (activity.Type == ActivityTypes.Message)
+        //{
+        //    if (!greetingMessageWasShown)
+        //    {
+        //        reply = activity.CreateReply($@"Hello, {preferredUserName}!
+        //                                                I am the Controso Bank Bot!
+        //                                                I can tell you the latest news from Contoso Bank, show exchange rates, notify about your transactions and do other things!");
+        //        //connector.Conversations.ReplyToActivityAsync(reply);
+        //        userData.SetProperty<bool>("GreetingMessageWasShown", true);
+        //        stateClient.BotState.SetUserData(activity.ChannelId, activity.From.Id, userData);
+        //    }
+        //    else
+        //    {
+        //        reply = activity.CreateReply($@"{preferredUserName}, You can use standard commands or turn on language recognition mode");
+        //    }
+
+
+        //}
+        //else
+        //{
+        //    HandleSystemMessage(activity);
+        //}
+
+        //var response = Request.CreateResponse(HttpStatusCode.OK);
+        //return response;
+
+
+
+        [Serializable]
+        public class RootDialog : IDialog<object>
+        {
+            private bool greetingMessageWasShown;
+
+            public async Task StartAsync(IDialogContext context)
+            {
+                string preferredUserName;
+                if (!context.UserData.TryGetValue("PreferredName", out preferredUserName))
+                {
+                    preferredUserName = "Sir or Madame";
+                    context.UserData.SetValue("PreferredName", preferredUserName);
+                }
+
+                await context.PostAsync($@"Hello, {preferredUserName}!
+                                           I am the Controso Bank Bot!
+                                           I can tell you the latest news from Contoso Bank, show exchange rates, notify about your transactions and do other things!");
+
+                context.Wait(this.MessageReceivedAsync);
+            }
+
+            private async Task MessageReceivedAsync(IDialogContext context, IAwaitable<object> result)
+            {
+                var message = await result as Activity;
+
+                string userName;
+
+                if (!context.UserData.TryGetValue("PreferredName", out userName))
+                {
+                    await context.PostAsync($"I dunno yo name");
+
+                    context.Wait(this.MessageReceivedAsync);
+                }
+
+                if (message.Text.Equals("(key)personalisation", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    context.Call(new PersonalisationDialog(), this.MessageReceivedAsync);
+                    return;
+                }
+                else if (message.Text.StartsWith("call me", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    var newName = message.Text.Substring("call me".Length).Trim();
+                    context.UserData.SetValue("PreferredName", newName);
+                    userName = newName;
+                }
+                else if (message.Text.StartsWith("(flag:US)exchangerates", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    var typingMessage = context.MakeMessage();
+                    typingMessage.Type = ActivityTypes.Typing;
+                    await context.PostAsync(typingMessage);
+                    await context.PostAsync(GetCurrencyExchangeInfo(message));
+                }
+                else
+                {
+                    Activity replyToConversation = message.CreateReply();
+                    replyToConversation.Recipient = message.From;
+                    replyToConversation.Type = "message";
+                    replyToConversation.Attachments = new List<Attachment>();
+                    List<CardAction> cardButtons = new List<CardAction>();
+
+                    cardButtons.Add(
+                        new CardAction()
+                        {
+                            Type = "imBack",
+                            Title = "(cash) Find ATMs nearby",
+                            Value = "(cash)showatms"
+                        });
+
+                    cardButtons.Add(
+                        new CardAction()
+                        {
+                            Type = "imBack",
+                            Title = "(bow) Find offices nearby",
+                            Value = "(bow)showoffices"
+                        });
+
+                    cardButtons.Add(
+                        new CardAction()
+                        {
+                            Type = "imBack",
+                            Title = "(flag:US) Foreign exchange rates",
+                            Value = "(flag:US)exchangerates"
+                        });
+
+                    cardButtons.Add(
+                        new CardAction()
+                        {
+                            Type = "imBack",
+                            Title = "(key) Personalisation",
+                            Value = "(key)personalisation"
+                        });
+
+                    SigninCard plCard = new SigninCard("Available options", cardButtons);
+                    Attachment plAttachment = plCard.ToAttachment();
+                    replyToConversation.Attachments.Add(plAttachment);
+
+                    context.UserData.SetValue("GreetingMessageWasShown", true);
+
+                    await context.PostAsync(replyToConversation);
+                }
+
+                context.Wait(this.MessageReceivedAsync);
+            }
+
+            private Activity GetCurrencyExchangeInfo(Activity message)
+            {
+                WebRequest request = WebRequest.Create(@"http://api.fixer.io/latest?base=NZD&symbols=AUD,USD,GBP,RUB");
+                var response = (HttpWebResponse)request.GetResponse();
+                StreamReader streamReader = new StreamReader(response.GetResponseStream());
+                string responceData = streamReader.ReadToEnd();
+                streamReader.Close();
+                response.Close();
+
+                RootObject r = JsonConvert.DeserializeObject<RootObject>(responceData);
+
+                Activity result = message.CreateReply();
+                result.Recipient = message.From;
+                result.Type = "message";
+                result.Attachments = new List<Attachment>();
+
+                HeroCard plCard = new HeroCard()
+                {
+                    Title = "Foreign currency exchange rates",
+                    Subtitle = $"{r.date}",
+                    Text = $"1 NZD = {r.rates.USD} USD\n     {r.rates.AUD} AUD\n     {r.rates.GBP} GBP\n     {r.rates.RUB} RUB"
+                };
+                Attachment plAttachment = plCard.ToAttachment();
+                result.Attachments.Add(plAttachment);
+
+                return result;
+            }
+
+
+            private async Task Personalisation(IDialogContext context, IAwaitable<object> result)
+            {
+                await context.PostAsync($"I dunno yo name");
+
+                context.Wait(this.MessageReceivedAsync);
+                return;
+            }
         }
 
 
@@ -93,6 +266,7 @@ namespace ContosoBankBot
             return null;
         }
     }
+
 
     public class UserInfo : IDisposable
     {
