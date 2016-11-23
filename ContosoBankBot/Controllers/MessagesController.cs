@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IdentityModel.Tokens;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -145,6 +146,20 @@ namespace ContosoBankBot
                     await context.PostAsync(typingMessage);
                     await context.PostAsync(GetCurrencyExchangeInfo(message));
                 }
+                else if (message.Text.StartsWith("getlatestnews", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    var typingMessage = context.MakeMessage();
+                    typingMessage.Type = ActivityTypes.Typing;
+                    await context.PostAsync(typingMessage);
+                    await context.PostAsync(GetLatestNews(message));
+                }
+                else if (message.Text.StartsWith("(bow)showoffices", StringComparison.InvariantCultureIgnoreCase))
+                {
+                    var typingMessage = context.MakeMessage();
+                    typingMessage.Type = ActivityTypes.Typing;
+                    await context.PostAsync(typingMessage);
+                    await context.PostAsync(GetOfficeLocation(message, "Auckland"));
+                }
                 else
                 {
                     Activity replyToConversation = message.CreateReply();
@@ -157,8 +172,8 @@ namespace ContosoBankBot
                         new CardAction()
                         {
                             Type = "imBack",
-                            Title = "(cash) Find ATMs nearby",
-                            Value = "(cash)showatms"
+                            Title = "Get latest news",
+                            Value = "getlatestnews"
                         });
 
                     cardButtons.Add(
@@ -185,6 +200,7 @@ namespace ContosoBankBot
                             Value = "(key)personalisation"
                         });
 
+
                     SigninCard plCard = new SigninCard("Available options", cardButtons);
                     Attachment plAttachment = plCard.ToAttachment();
                     replyToConversation.Attachments.Add(plAttachment);
@@ -197,6 +213,45 @@ namespace ContosoBankBot
                 context.Wait(this.MessageReceivedAsync);
             }
 
+            private IMessageActivity GetLatestNews(Activity message)
+            {
+                WebRequest request = WebRequest.Create(@"https://contosobank-easytables.azurewebsites.net/tables/BankNews");
+                request.Method = "GET";
+                request.ContentType = "application/json";
+                request.Headers.Add("ZUMO-API-VERSION", "2.0.0");
+
+                var response = (HttpWebResponse)request.GetResponse();
+                StreamReader streamReader = new StreamReader(response.GetResponseStream());
+                string responceData = streamReader.ReadToEnd();
+                streamReader.Close();
+                response.Close();
+
+                List<News.RootObject> listRootObjects = JsonConvert.DeserializeObject<List<News.RootObject>>(responceData);
+
+                Activity result = message.CreateReply();
+                result.Recipient = message.From;
+                result.Type = "message";
+                result.Attachments = new List<Attachment>();
+
+                foreach (var rootObject in listRootObjects)
+                {
+                    DateTime newsDate;
+                    if (!DateTime.TryParse(rootObject.UpdatedAt, out newsDate))
+                        newsDate = DateTime.Today;
+
+                    HeroCard plCard = new HeroCard()
+                    {
+                        Title = rootObject.Title,
+                        Subtitle = newsDate.ToString("d"),
+                        Text = rootObject.Text
+                    };
+                    Attachment plAttachment = plCard.ToAttachment();
+                    result.Attachments.Add(plAttachment);
+                }
+
+                return result;
+            }
+
             private Activity GetCurrencyExchangeInfo(Activity message)
             {
                 WebRequest request = WebRequest.Create(@"http://api.fixer.io/latest?base=NZD&symbols=AUD,USD,GBP,RUB");
@@ -206,7 +261,11 @@ namespace ContosoBankBot
                 streamReader.Close();
                 response.Close();
 
-                RootObject r = JsonConvert.DeserializeObject<RootObject>(responceData);
+                RatesRootObject r = JsonConvert.DeserializeObject<RatesRootObject>(responceData);
+
+                DateTime rateDate;
+                if (!DateTime.TryParse(r.date, out rateDate))
+                    rateDate = DateTime.Today;
 
                 Activity result = message.CreateReply();
                 result.Recipient = message.From;
@@ -216,7 +275,7 @@ namespace ContosoBankBot
                 HeroCard plCard = new HeroCard()
                 {
                     Title = "Foreign currency exchange rates",
-                    Subtitle = $"{r.date}",
+                    Subtitle = rateDate.ToString("d"),
                     Text = $"1 NZD = {r.rates.USD} USD\n     {r.rates.AUD} AUD\n     {r.rates.GBP} GBP\n     {r.rates.RUB} RUB"
                 };
                 Attachment plAttachment = plCard.ToAttachment();
@@ -225,13 +284,56 @@ namespace ContosoBankBot
                 return result;
             }
 
-
-            private async Task Personalisation(IDialogContext context, IAwaitable<object> result)
+            private Activity GetOfficeLocation(Activity message, string city)
             {
-                await context.PostAsync($"I dunno yo name");
+                WebRequest request = WebRequest.Create(@"https://contosobank-easytables.azurewebsites.net/tables/OfficeLocations");
+                request.Method = "GET";
+                request.ContentType = "application/json";
+                request.Headers.Add("ZUMO-API-VERSION", "2.0.0");
 
-                context.Wait(this.MessageReceivedAsync);
-                return;
+                var response = (HttpWebResponse)request.GetResponse();
+                StreamReader streamReader = new StreamReader(response.GetResponseStream());
+                string responceData = streamReader.ReadToEnd();
+                streamReader.Close();
+                response.Close();
+
+                List<OfficeAddress.RootObject> listRootObjects = JsonConvert.DeserializeObject<List<OfficeAddress.RootObject>>(responceData);
+
+                Activity result = message.CreateReply();
+                result.Recipient = message.From;
+                result.Type = "message";
+                result.Attachments = new List<Attachment>();
+
+                foreach (var rootObject in listRootObjects)
+                {
+                    if (rootObject.City.ToLower() == city.ToLower())
+                    {
+                        List<CardAction> cardButtons = new List<CardAction>();
+                        result.Attachments.Add(new HeroCard()
+                        {
+                            Title = "Office in " + rootObject.City,
+                            Subtitle = rootObject.Location,
+                            Text = "Phone: " + rootObject.Phone,
+                            Buttons = cardButtons
+                        }.ToAttachment());
+
+                        cardButtons.Add(new CardAction()
+                        {
+                            Value = @"https://www.bing.com/maps?rtp=~adr.One" + rootObject.Location.Replace(" ", "%20") + @"&style=r&lvl=16&trfc=1",
+                            Type = "openUrl",
+                            Title = "Open on Bing Maps"
+                        });
+
+                        cardButtons.Add(new CardAction()
+                        {
+                            Value = rootObject.Phone,
+                            Type = "call",
+                            Title = "Call office"
+                        });
+                    }
+                }
+
+                return result;
             }
         }
 

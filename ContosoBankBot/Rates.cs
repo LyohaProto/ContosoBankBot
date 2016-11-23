@@ -14,7 +14,7 @@ namespace ContosoBankBot
         public double USD { get; set; }
     }
 
-    public class RootObject
+    public class RatesRootObject
     {
         public string @base { get; set; }
         public string date { get; set; }
