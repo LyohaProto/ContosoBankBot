@@ -77,19 +77,6 @@ namespace ContosoBankBot
             if (!context.UserData.TryGetValue("PreferredName", out displayedUserName))
                 displayedUserName = "Sir or Madame";
 
-            bool greetingMessageWasShown;
-            if (!context.UserData.TryGetValue("GreetingMessageWasShown", out greetingMessageWasShown))
-                greetingMessageWasShown = false;
-
-            if (greetingMessageWasShown)
-            {
-                await context.PostAsync($@"Hello, {displayedUserName}!
-                                           I am the Controso Bank Bot!
-                                           I can tell you the latest news from Contoso Bank, show exchange rates, guide you to one of our offices and do other things!");
-
-                context.UserData.SetValue("GreetingMessageWasShown", true);
-            }
-
             var mainMenuMessage = context.MakeMessage();
             mainMenuMessage.Recipient = mainMenuMessage.From;
             mainMenuMessage.Type = "message";
