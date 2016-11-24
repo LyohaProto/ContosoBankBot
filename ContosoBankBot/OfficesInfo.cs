@@ -28,13 +28,10 @@ namespace ContosoBankBot
             result.Type = "message";
             result.Attachments = new List<Attachment>();
 
-            bool noOfficesFound = true;
-
             foreach (var rootObject in listRootObjects)
             {
                 if (rootObject.City.ToLower() == city.ToLower())
                 {
-                    noOfficesFound = false;
                     List<CardAction> cardButtons = new List<CardAction>();
                     result.Attachments.Add(new HeroCard()
                     {
@@ -59,9 +56,6 @@ namespace ContosoBankBot
                     });
                 }
             }
-
-            if (noOfficesFound)
-                result.Text = $"We are sorry, but Contoso Bank does not have a branch in {city} yet.";
 
             return result;
         }
