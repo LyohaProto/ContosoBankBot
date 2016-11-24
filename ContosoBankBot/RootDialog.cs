@@ -59,7 +59,7 @@ namespace ContosoBankBot
 
                 context.Wait(MessageReceivedAsync);
             }
-            else if (message.Text == "personalisation")
+            else if (message.Text.ToLower(CultureInfo.InvariantCulture).Contains("personalisation"))
             {
                 context.Call(new PersonalisationDialog(), FormDialogComplete);
             }
@@ -81,7 +81,7 @@ namespace ContosoBankBot
             if (!context.UserData.TryGetValue("GreetingMessageWasShown", out greetingMessageWasShown))
                 greetingMessageWasShown = false;
 
-            if (greetingMessageWasShown)
+            if (!greetingMessageWasShown)
             {
                 await context.PostAsync($@"Hello, {displayedUserName}!
                                            I am the Controso Bank Bot!
@@ -90,7 +90,7 @@ namespace ContosoBankBot
                 context.UserData.SetValue("GreetingMessageWasShown", true);
             }
 
-            var mainMenuMessage = context.MakeMessage();
+            IMessageActivity mainMenuMessage = context.MakeMessage();
             mainMenuMessage.Recipient = mainMenuMessage.From;
             mainMenuMessage.Type = "message";
             mainMenuMessage.Attachments = new List<Attachment>();

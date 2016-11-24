@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Bot.Builder.Dialogs;
 using Microsoft.Bot.Connector;
@@ -29,7 +30,7 @@ namespace ContosoBankBot
             }
             else if (message.Text.ToLower(CultureInfo.InvariantCulture).Contains("exit"))
             {
-                //await Conversation.SendAsync(message, () => new EchoDialog());
+                //Exit
             }
             else
             {
